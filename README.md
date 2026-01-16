@@ -1,6 +1,8 @@
-# Event-Driven System
+# Event-Driven System (In-Memory, Single-JVM)
 
-A minimal, fully understandable event-driven system using Maven monorepo architecture.
+A minimal, fully understandable event-driven system using a Maven multi-module layout. It focuses on clarity over features and demonstrates an in-memory, thread-safe Event Bus with asynchronous dispatch.
+
+Important: This Event Bus is in-memory and process-local. Two separate JVM processes do not share an event bus. The provided producer-service and consumer-service are standalone demos; they will not communicate with each other when run as separate processes.
 
 ## Project Structure
 
@@ -14,122 +16,178 @@ reflex/
 │       │   ├── Event.java
 │       │   ├── EventHandler.java
 │       │   └── EventBus.java
-│       └── test/java/com/eventdriven/eventbus/
-│           └── EventBusTest.java
-├── producer-service/          # Event publisher
+└── consumer-service/          # Demo: registers a handler for PriceUpdatedEvent
+    ├── pom.xml
+    └── src/main/java/
+        ├── com/eventdriven/consumer/
+        │   └── ConsumerMain.java
+        └── com/eventdriven/demo/
+            └── DemoMain.java   # Single-JVM end-to-end demo using a shared EventBus
+├── producer-service/          # Demo: publishes PriceUpdatedEvent periodically
 │   ├── pom.xml
 │   └── src/main/java/com/eventdriven/producer/
 │       ├── PriceUpdatedEvent.java
 │       └── ProducerMain.java
-└── consumer-service/          # Event consumer
+└── consumer-service/          # Demo: registers a handler for PriceUpdatedEvent
     ├── pom.xml
     └── src/main/java/com/eventdriven/consumer/
         └── ConsumerMain.java
 ```
 
-## Architecture
+## How It Works
 
-- **event-bus**: Pure Java library providing thread-safe, asynchronous event publishing using `ExecutorService`
-- **producer-service**: Publishes `PriceUpdatedEvent` every 2 seconds with random stock prices
-- **consumer-service**: Listens for and prints received price events
+- event-bus: Pure Java class providing thread-safe, asynchronous event publishing using ExecutorService.
+- Event: Marker interface with a timestamp for immutable domain events.
+- EventHandler<T>: Functional interface for type-safe event handling.
+- EventBus: Maintains handlers in ConcurrentHashMap with CopyOnWriteArrayList, publishes events asynchronously via a fixed thread pool, and supports graceful shutdown.
+
+Asynchronous communication demo: DemoMain wires a producer and consumer to the same EventBus instance within one JVM. Published events appear immediately and are handled asynchronously by the registered consumer handler.
 
 ## Requirements
 
 - Java 17 or higher
 - Maven 3.6+
 
-## Building the Project
+## Build
 
-From the root directory:
+From the repository root:
 
-```bash
-mvn clean install
+```
+mvn clean compile
 ```
 
-This will:
-1. Build the event-bus library
-2. Run unit tests
-3. Build producer-service
-4. Build consumer-service
+Notes:
+- clean compile is sufficient for running the in-repo demo classes from target/classes.
+- There are currently no test classes in this repository.
+- If you want to build JARs, see the JAR section below.
 
-## Running the System
+## Running the Demos
 
-### Option 1: Run with Maven (Recommended for Testing)
+Because the Event Bus is in-memory and not distributed, each JVM has its own bus instance. Therefore, running ProducerMain and ConsumerMain in separate terminals will not result in messages being delivered between them. Use the following demos as separate examples.
 
-**Terminal 1 - Start Consumer:**
-```bash
-cd consumer-service
-mvn exec:java -Dexec.mainClass="com.eventdriven.consumer.ConsumerMain"
+### Single-JVM End-to-End Demo (Recommended)
+
+A self-contained demo is included at consumer-service/src/main/java/com/eventdriven/demo/DemoMain.java. It creates a single EventBus, registers a consumer, and publishes events periodically in the same JVM, demonstrating asynchronous handling end-to-end.
+
+Run from the repository root (Windows classpath separator ; and backslashes for paths):
+
+```
+mvn clean compile
+java -cp "event-bus\\target\\classes;producer-service\\target\\classes;consumer-service\\target\\classes" com.eventdriven.demo.DemoMain
 ```
 
-**Terminal 2 - Start Producer:**
-```bash
-cd producer-service
-mvn exec:java -Dexec.mainClass="com.eventdriven.producer.ProducerMain"
+On Linux/macOS use : as the classpath separator and forward slashes for paths:
+
+```
+mvn clean compile
+java -cp "event-bus/target/classes:producer-service/target/classes:consumer-service/target/classes" com.eventdriven.demo.DemoMain
 ```
 
-### Option 2: Run JAR Files
+Expected output (example):
+```
+Demo running. Press Ctrl+C to stop.
+[PUBLISHED] AAPL at $486.14
+[RECEIVED] 23:07:51 | AAPL at $486.14
+[PUBLISHED] AMZN at $487.14
+[RECEIVED] 23:07:54 | AMZN at $487.14
+[PUBLISHED] TSLA at $307.34
+[RECEIVED] 23:07:56 | TSLA at $307.34
+[PUBLISHED] AAPL at $243.26
+[RECEIVED] 23:07:58 | AAPL at $243.26
+```
 
-**Build JARs with dependencies:**
-```bash
+### Separate Producer and Consumer Demos
+
+- Producer demo (publishes events and logs publish messages):
+  ```
+  cd producer-service
+  mvn clean compile
+  java -cp "..\\event-bus\\target\\classes;target\\classes" com.eventdriven.producer.ProducerMain
+  ```
+
+- Consumer demo (registers a handler and waits; only receives events published on the same EventBus instance within the same JVM):
+  ```
+  cd consumer-service
+  mvn clean compile
+  java -cp "..\\event-bus\\target\\classes;..\\producer-service\\target\\classes;target\\classes" com.eventdriven.consumer.ConsumerMain
+  ```
+
+These processes are independent and will not communicate with each other.
+
+### Why two processes won't talk
+
+- The Event Bus is an in-memory data structure. It is not a networked or distributed message broker.
+- Separate Java processes (JVMs) have separate memory spaces and therefore separate EventBus instances.
+
+### End-to-End (single JVM) options
+
+If you want to see end-to-end publishing and consuming together, use one of the following approaches:
+
+- Use the unit tests in event-bus (see Running Tests) which demonstrate handlers receiving events.
+- Create a simple single-JVM launcher that:
+  - Instantiates one EventBus
+  - Registers the consumer handler (ConsumerMain logic)
+  - Publishes price events periodically (ProducerMain logic)
+
+This repository purposefully keeps producer and consumer as separate, minimal demos to focus on the Event Bus API. A combined demo can be added as an exercise if desired.
+
+## Running JARs
+
+You can package the modules as JARs if you prefer to run from artifacts:
+
+```
 mvn clean package
 ```
 
-**Terminal 1 - Start Consumer:**
-```bash
-java -cp "consumer-service/target/consumer-service-1.0.0.jar;event-bus/target/event-bus-1.0.0.jar;producer-service/target/producer-service-1.0.0.jar" com.eventdriven.consumer.ConsumerMain
-```
+Windows examples:
+- Producer from JAR:
+  ```
+  java -cp "producer-service\\target\\producer-service-1.0.0.jar;event-bus\\target\\event-bus-1.0.0.jar" com.eventdriven.producer.ProducerMain
+  ```
+- Consumer from JAR:
+  ```
+  java -cp "consumer-service\\target\\consumer-service-1.0.0.jar;event-bus\\target\\event-bus-1.0.0.jar;producer-service\\target\\producer-service-1.0.0.jar" com.eventdriven.consumer.ConsumerMain
+  ```
 
-**Terminal 2 - Start Producer:**
-```bash
-java -cp "producer-service/target/producer-service-1.0.0.jar;event-bus/target/event-bus-1.0.0.jar" com.eventdriven.producer.ProducerMain
-```
+On Linux/macOS replace ; with : and \\ with /.
+
+Again, these are independent demos and will not communicate across processes.
 
 ## Running Tests
 
-```bash
-cd event-bus
-mvn test
-```
+There are currently no automated tests in this repository.
 
-## Expected Behavior
+## API Overview
 
-**Producer Output:**
-```
-Producer Service Started
-Publishing price updates every 2 seconds...
-Press Ctrl+C to stop
+- Event
+  - Marker interface for immutable events with a `long getTimestamp()`.
+- EventHandler<T extends Event>
+  - Functional interface: `void handle(T event)`.
+- EventBus
+  - `registerHandler(Class<T> eventType, EventHandler<T> handler)`
+  - `publish(T event)` (async dispatch to all handlers registered for event type)
+  - `shutdown()` (graceful executor shutdown)
 
-[PUBLISHED] AAPL at $245.67
-[PUBLISHED] GOOGL at $312.89
-[PUBLISHED] TSLA at $189.34
-```
+## Extending the System
 
-**Consumer Output:**
-```
-Consumer Service Started
-Listening for price update events...
-Press Ctrl+C to stop
+- Add new events: Create a class implementing `Event` and make it immutable.
+- Add handlers: Implement `EventHandler<MyEvent>` and register it via `eventBus.registerHandler(MyEvent.class, handler)`.
+- Control concurrency: Use `new EventBus(threadPoolSize)` to tune the executor size.
+- Error handling: Handlers are wrapped with try/catch during dispatch; extend or adapt as needed.
 
-[RECEIVED] 15:19:45 | AAPL at $245.67
-[RECEIVED] 15:19:47 | GOOGL at $312.89
-[RECEIVED] 15:19:49 | TSLA at $189.34
-```
+## Design Choices
 
-## Key Design Decisions
-
-1. **Thread Safety**: Uses `ConcurrentHashMap` and `CopyOnWriteArrayList` for handler storage
-2. **Async Execution**: `ExecutorService` with fixed thread pool for non-blocking event dispatch
-3. **Type Safety**: Generic `EventHandler<T>` ensures compile-time type checking
-4. **Simplicity**: No frameworks, no annotations, no external dependencies (except JUnit for tests)
-5. **Graceful Shutdown**: Shutdown hooks ensure proper cleanup of thread pools
+1. Thread Safety: ConcurrentHashMap and CopyOnWriteArrayList for handler storage.
+2. Async Execution: Fixed thread pool via ExecutorService for non-blocking dispatch.
+3. Type Safety: Generics on EventHandler<T> ensure compile-time type checks.
+4. Simplicity: No frameworks, annotations, or external runtime dependencies.
+5. Graceful Shutdown: Shutdown hooks recommended in demos.
 
 ## Limitations (By Design)
 
 - In-memory only (events not persisted)
-- Single JVM (no distributed messaging)
-- No event replay or history
-- No guaranteed delivery
-- No transaction support
+- Single JVM (no distributed messaging between processes)
+- No event replay or durable history
+- No guaranteed delivery or transactions
 
-This is intentional - the system is designed as a learning foundation for understanding event-driven patterns.
+These constraints are intentional to keep the project minimal.
