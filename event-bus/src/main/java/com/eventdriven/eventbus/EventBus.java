@@ -37,7 +37,23 @@ public class EventBus {
     public <T extends Event> void registerHandler(Class<T> eventType, EventHandler<T> handler) {
         handlers.computeIfAbsent(eventType, k -> new CopyOnWriteArrayList<>()).add(handler);
     }
-    
+
+    /** 
+     * Removes a handler for a specific type.
+     * While multiple handlers for an event exist, 
+     * This removes the particular handler from the list of handlers for the event.
+     * 
+     * @param eventType the class of event to remove
+     * @param handler the handler to be removed when event of the eventType is published
+    */
+    public <T extends Event> boolean removeHandler(Class<T> eventType, EventHandler<T> handler) {
+        List<EventHandler<? extends Event>> eventHandlers = handlers.get(eventType);
+        if (eventHandlers != null) {
+            eventHandlers.remove(handler);
+            return true;
+        }
+        return false;
+    }
     /**
      * Publishes an event to all registered handlers asynchronously.
      * Each handler is invoked in a separate thread from the executor pool.
